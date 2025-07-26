@@ -1,0 +1,120 @@
+import cv2
+import numpy as np
+from moviepy.editor import VideoFileClip
+from PIL import ImageFont, ImageDraw, Image
+
+basic_list = ['133', '166', '什么啊~已经早上了~']
+jp_list = ['な', 'ん', 'だ', '~', 'も', 'う', '朝', '…', 'か', 'と', '…']
+romaji_list = ['na', 'n', 'da', '~', 'mo', 'u', 'asa', '…', 'ka', 'to', '…']
+kana_list = ['', '', '', '', '', '', 'あさ', '', '', '', '']
+
+# 新增：字幕结构体
+subtitles = [{
+    "start_frame": int(basic_list[0]),
+    "end_frame": int(basic_list[1]),
+    "cn": basic_list[2],
+    "jp": jp_list,
+    "romaji": romaji_list,
+    "kana": kana_list
+}]
+
+FONT_PATH_CN = "msyhbd.ttc"  # 微软雅黑粗体
+FONT_PATH_JP = "UDDigiKyokashoN-B.ttc"  # 日文字体（Meiryo，现代日文显示效果佳）
+FONT_PATH_ROMAJI = "arialbd.ttf"  # 罗马音粗体
+FONT_SIZE_CN = 40
+FONT_SIZE_JP = 40
+FONT_SIZE_ROMAJI = 28
+FONT_SIZE_KANA = 28
+
+def draw_text(img, text, pos, font, fill, anchor=None):
+    draw = ImageDraw.Draw(img)
+    draw.text(pos, text, font=font, fill=fill, anchor=anchor)
+
+def render_subtitle(frame, subtitle, frame_idx):
+    # 转为PIL Image
+    img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    w, h = img_pil.size
+
+    # 字体
+    font_cn = ImageFont.truetype(FONT_PATH_CN, FONT_SIZE_CN)
+    font_jp = ImageFont.truetype(FONT_PATH_JP, FONT_SIZE_JP)
+    font_romaji = ImageFont.truetype(FONT_PATH_ROMAJI, FONT_SIZE_ROMAJI)
+    font_kana = ImageFont.truetype(FONT_PATH_JP, FONT_SIZE_KANA)
+
+    # 居中参数
+    line_gap = 4
+    # 计算总内容高度
+    total_height = FONT_SIZE_KANA + line_gap + FONT_SIZE_JP + line_gap + FONT_SIZE_ROMAJI + line_gap + FONT_SIZE_CN
+    y_top = (h - total_height) // 2
+
+    # 假名注音
+    jp_text = ''.join(subtitle["jp"])
+    romaji_texts = subtitle["romaji"]
+    jp_chars = subtitle["jp"]
+    kana_texts = subtitle["kana"]
+    # 计算每个字的宽度
+    font_jp = ImageFont.truetype(FONT_PATH_JP, FONT_SIZE_JP)
+    jp_widths = [font_jp.getbbox(c)[2] - font_jp.getbbox(c)[0] for c in jp_chars]
+    total_jp_width = sum(jp_widths)
+    x_start = w//2 - total_jp_width//2
+
+    # 假名注音（最上）
+    y_kana = y_top + FONT_SIZE_KANA // 2
+    x = x_start
+    for i, kana in enumerate(kana_texts):
+        if kana:
+            c_width = jp_widths[i]
+            draw_text(img_pil, kana, (x + c_width//2, y_kana), font_kana, (0,255,255), anchor="mm")
+        x += jp_widths[i]
+
+    # 日文原文
+    y_jp = y_kana + FONT_SIZE_KANA // 2 + line_gap + FONT_SIZE_JP // 2
+    draw_text(img_pil, jp_text, (w//2, y_jp), font_jp, (255,255,255), anchor="mm")
+
+    # 罗马音（稍靠上）
+    y_romaji = y_jp + FONT_SIZE_JP // 2 + line_gap // 2 + FONT_SIZE_ROMAJI // 2
+    x = x_start
+    for i, roma in enumerate(romaji_texts):
+        c = jp_chars[i]
+        c_width = jp_widths[i]
+        draw_text(img_pil, roma, (x + c_width//2, y_romaji), font_romaji, (255,255,0), anchor="mm")
+        x += c_width
+
+    # 中文（最下）
+    y_cn = y_romaji + FONT_SIZE_ROMAJI // 2 + line_gap + FONT_SIZE_CN // 2
+    draw_text(img_pil, subtitle["cn"], (w//2, y_cn), font_cn, (255,255,255), anchor="mm")
+
+    # 转回OpenCV格式
+    return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+
+def process_video(input_path, output_path, subtitles):
+    cap = cv2.VideoCapture(input_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = 1920
+    height = 100  # 固定高度为100，便于拼接
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+    frame_idx = 0
+    subtitle = subtitles[0]
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        # 判断是否在字幕帧区间
+        if subtitle["start_frame"] <= frame_idx <= subtitle["end_frame"]:
+            frame = render_subtitle(frame, subtitle, frame_idx)
+        out.write(frame)
+        frame_idx += 1
+
+    cap.release()
+    out.release()
+
+if __name__ == "__main__":
+    # 生成一张空白图片用于预览
+    width = 1920
+    height = 200  # 固定高度为100，便于拼接
+    blank_frame = np.zeros((height, width, 3), dtype=np.uint8)
+    preview_img = render_subtitle(blank_frame, subtitles[0], 0)
+    cv2.imwrite("preview.png", preview_img)
+    print("已输出预览图片 preview.png")
